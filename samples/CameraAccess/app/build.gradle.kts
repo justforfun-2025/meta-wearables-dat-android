@@ -51,6 +51,11 @@ android {
         "OPENCLAW_URL",
         "\"${localProperties.getProperty("openclaw_url", "")}\""
     )
+    buildConfigField(
+        "String",
+        "OPENCLAW_TOKEN",
+        "\"${localProperties.getProperty("openclaw_token", "")}\""
+    )
   }
 
   buildTypes {

@@ -171,14 +171,6 @@ fun NonStreamScreen(
             onClick = { viewModel.navigateToStreaming(onRequestWearablesPermission) },
             enabled = uiState.hasActiveDevice,
         )
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Gemini Live Button
-        SwitchButton(
-            label = stringResource(R.string.gemini_live_button),
-            onClick = { viewModel.navigateToGeminiLive() },
-        )
       }
 
       // Getting Started Sheet

@@ -81,10 +81,6 @@ fun CameraAccessScaffold(
   Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
     Box(modifier = Modifier.fillMaxSize()) {
       when {
-        uiState.isGeminiLive ->
-            GeminiLiveScreen(
-                onNavigateBack = { viewModel.navigateFromGeminiLive() },
-            )
         uiState.isStreaming ->
             StreamScreen(
                 wearablesViewModel = viewModel,

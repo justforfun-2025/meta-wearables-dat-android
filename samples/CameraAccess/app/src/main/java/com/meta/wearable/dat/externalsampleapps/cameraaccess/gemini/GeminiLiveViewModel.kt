@@ -20,6 +20,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 
 import android.annotation.SuppressLint
 import android.app.Application
+import android.graphics.Bitmap
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -29,6 +30,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
+import java.io.ByteArrayOutputStream
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -58,13 +60,22 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
 
     // How often to send audio chunks (in milliseconds)
     private const val AUDIO_CHUNK_DURATION_MS = 100
+
+    // How often to send video frames to Gemini (~1fps)
+    private const val VIDEO_FRAME_INTERVAL_MS = 1000L
+
+    // JPEG quality for video frames sent to Gemini (0-100)
+    private const val VIDEO_FRAME_JPEG_QUALITY = 50
   }
 
   private val session = GeminiLiveSession(apiKey = BuildConfig.GEMINI_API_KEY)
 
   private val openClawClient =
       if (BuildConfig.OPENCLAW_URL.isNotEmpty()) {
-        OpenClawClient(BuildConfig.OPENCLAW_URL)
+        OpenClawClient(
+            baseUrl = BuildConfig.OPENCLAW_URL,
+            gatewayToken = BuildConfig.OPENCLAW_TOKEN,
+        )
       } else {
         null
       }
@@ -83,6 +94,9 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
   // Buffer to accumulate assistant text responses across chunks
   private val assistantTextBuffer = StringBuilder()
 
+  // Throttle video frame sending to ~1fps
+  private var lastFrameSentMs = 0L
+
   /** Connect to the Gemini Live API. */
   fun connect() {
     if (_uiState.value.connectionState == SessionState.CONNECTING ||
@@ -92,6 +106,7 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     addTranscriptEntry(TranscriptRole.SYSTEM, "Connecting to Gemini Live...")
+    openClawClient?.resetSession()
     initAudioTrack()
     startEventCollection()
     startSessionStateMonitoring()
@@ -135,6 +150,27 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
     }
     addTranscriptEntry(TranscriptRole.USER, text)
     session.sendText(text)
+  }
+
+  /**
+   * Forward a video frame from the DAT camera stream to Gemini for visual context.
+   * Frames are throttled to ~1fps and compressed to JPEG before sending.
+   */
+  fun onVideoFrame(bitmap: Bitmap) {
+    if (_uiState.value.connectionState != SessionState.CONNECTED) return
+    val now = System.currentTimeMillis()
+    if (now - lastFrameSentMs < VIDEO_FRAME_INTERVAL_MS) return
+    lastFrameSentMs = now
+
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        val stream = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, VIDEO_FRAME_JPEG_QUALITY, stream)
+        session.sendImage(stream.toByteArray())
+      } catch (e: Exception) {
+        Log.e(TAG, "Failed to send video frame: ${e.message}")
+      }
+    }
   }
 
   /** Clear any error message shown in the UI. */
@@ -282,7 +318,18 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
     sessionStateJob =
         viewModelScope.launch {
           session.sessionState.collect { state ->
-            _uiState.update { it.copy(connectionState = state) }
+            _uiState.update {
+              it.copy(
+                  connectionState = state,
+                  // Clear spinning tool call if connection drops
+                  activeToolCall =
+                      if (state == SessionState.ERROR || state == SessionState.DISCONNECTED) null
+                      else it.activeToolCall,
+              )
+            }
+            if (state == SessionState.ERROR || state == SessionState.DISCONNECTED) {
+              finalizeLastTranscriptEntry()
+            }
           }
         }
   }
@@ -305,16 +352,43 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
                 assistantTextBuffer.append(event.text)
               }
 
+              is ServerEvent.InputTranscription -> {
+                // Transcription of user's speech — show as a user message
+                addOrUpdateTranscriptEntry(TranscriptRole.USER, event.text)
+              }
+
+              is ServerEvent.OutputTranscription -> {
+                // Transcription of model's speech — show as an assistant message
+                addOrUpdateTranscriptEntry(TranscriptRole.ASSISTANT, event.text)
+              }
+
               is ServerEvent.TurnComplete -> {
-                // Flush any accumulated assistant text
+                // Flush any accumulated assistant text (from text parts, not transcription)
                 if (assistantTextBuffer.isNotEmpty()) {
-                  addTranscriptEntry(TranscriptRole.ASSISTANT, assistantTextBuffer.toString())
+                  // Only add if we didn't already get output transcription for this turn
                   assistantTextBuffer.clear()
                 }
+                // Finalize any in-progress transcript entries
+                finalizeLastTranscriptEntry()
               }
 
               is ServerEvent.ToolCall -> {
                 handleToolCall(event)
+              }
+
+              is ServerEvent.Interrupted -> {
+                // User interrupted the model — flush any buffered text and stop playback
+                assistantTextBuffer.clear()
+                finalizeLastTranscriptEntry()
+                // Drain pending audio to stop playback quickly
+                while (audioPlaybackChannel.tryReceive().isSuccess) { /* discard */ }
+                Log.d(TAG, "Model response interrupted")
+              }
+
+              is ServerEvent.ToolCallCancellation -> {
+                Log.d(TAG, "Tool call cancelled: ${event.ids}")
+                _uiState.update { it.copy(activeToolCall = null) }
+                addTranscriptEntry(TranscriptRole.SYSTEM, "Tool call cancelled")
               }
 
               is ServerEvent.Error -> {
@@ -351,18 +425,16 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
       val resultJson = JSONObject()
 
       if (openClawClient != null) {
-        val result = openClawClient.executeTask(task)
+        val result = openClawClient.executeTask(task, toolCall.functionName)
         result
-            .onSuccess { responseBody ->
-              resultJson.put("success", true)
-              resultJson.put("result", responseBody)
+            .onSuccess { content ->
+              resultJson.put("result", content)
               _uiState.update {
                 it.copy(activeToolCall = it.activeToolCall?.copy(status = ToolCallStatus.COMPLETED))
               }
               addTranscriptEntry(TranscriptRole.TOOL, "Completed: $task")
             }
             .onFailure { error ->
-              resultJson.put("success", false)
               resultJson.put("error", error.message ?: "Unknown error")
               _uiState.update {
                 it.copy(activeToolCall = it.activeToolCall?.copy(status = ToolCallStatus.FAILED))
@@ -371,7 +443,6 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
             }
       } else {
         // No OpenClaw URL configured — return a simulated success
-        resultJson.put("success", true)
         resultJson.put(
             "result",
             "Task acknowledged (OpenClaw not configured): $task",
@@ -385,7 +456,7 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
       // Send the tool response back to Gemini
       session.sendToolResponse(
           toolCall.functionCallId,
-          JSONObject().apply { put("output", resultJson) },
+          resultJson,
       )
 
       // Clear active tool call after a short delay for UI visibility
@@ -400,6 +471,39 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
       val updatedTranscript = (currentState.transcript + TranscriptEntry(role, text))
           .toImmutableList()
       currentState.copy(transcript = updatedTranscript)
+    }
+  }
+
+  /**
+   * Add a new transcript entry or append to the last one if it's the same role and not finalized.
+   * Used for live transcription which arrives as incremental fragments.
+   */
+  private fun addOrUpdateTranscriptEntry(role: TranscriptRole, text: String) {
+    _uiState.update { currentState ->
+      val entries = currentState.transcript.toMutableList()
+      val lastEntry = entries.lastOrNull()
+
+      if (lastEntry != null && lastEntry.role == role && !lastEntry.isFinalized) {
+        // Append to existing in-progress entry
+        entries[entries.lastIndex] = lastEntry.copy(text = lastEntry.text + text)
+      } else {
+        // Add new in-progress entry
+        entries.add(TranscriptEntry(role = role, text = text, isFinalized = false))
+      }
+
+      currentState.copy(transcript = entries.toImmutableList())
+    }
+  }
+
+  /** Mark the last transcript entry as finalized (no more updates). */
+  private fun finalizeLastTranscriptEntry() {
+    _uiState.update { currentState ->
+      val entries = currentState.transcript.toMutableList()
+      val lastEntry = entries.lastOrNull()
+      if (lastEntry != null && !lastEntry.isFinalized) {
+        entries[entries.lastIndex] = lastEntry.copy(isFinalized = true)
+      }
+      currentState.copy(transcript = entries.toImmutableList())
     }
   }
 

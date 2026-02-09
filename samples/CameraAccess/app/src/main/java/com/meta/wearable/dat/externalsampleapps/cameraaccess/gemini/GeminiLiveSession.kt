@@ -61,6 +61,18 @@ sealed class ServerEvent {
       val args: Map<String, String>,
   ) : ServerEvent()
 
+  /** Transcription of user's audio input. */
+  data class InputTranscription(val text: String) : ServerEvent()
+
+  /** Transcription of model's audio output. */
+  data class OutputTranscription(val text: String) : ServerEvent()
+
+  /** The model's response was interrupted (e.g. user started speaking). */
+  data object Interrupted : ServerEvent()
+
+  /** A pending tool call was cancelled (e.g. user interrupted during tool execution). */
+  data class ToolCallCancellation(val ids: List<String>) : ServerEvent()
+
   /** An error occurred. */
   data class Error(val message: String) : ServerEvent()
 }
@@ -68,10 +80,36 @@ sealed class ServerEvent {
 class GeminiLiveSession(
     private val apiKey: String,
     private val systemInstruction: String =
-        "You are a helpful voice assistant running on smart glasses. " +
-            "You can fulfill user requests by calling the execute tool. " +
-            "Always verbally acknowledge the user's request before calling the tool. " +
-            "After receiving the tool result, confirm completion to the user.",
+        "You are an AI assistant for someone wearing Meta Ray-Ban smart glasses. " +
+            "You can see through their camera and have a voice conversation. " +
+            "Keep responses concise and natural.\n\n" +
+            "You are smart and capable. Answer questions, have conversations, describe what you see, " +
+            "identify objects, read text, and help the user directly whenever you can. " +
+            "You have access to the live camera feed — use it to answer visual questions " +
+            "(e.g. \"what is this plant?\", \"what does that sign say?\", \"describe what you see\"). " +
+            "Handle these yourself without calling any tool.\n\n" +
+            "You also have ONE tool: execute. This connects you to a powerful personal assistant " +
+            "that can take real-world actions you cannot do yourself. " +
+            "Only call execute when the user's request requires an EXTERNAL ACTION that you " +
+            "genuinely cannot perform, such as:\n" +
+            "- Sending a message to someone (WhatsApp, Telegram, iMessage, Slack, etc.)\n" +
+            "- Adding to or modifying a shopping list, reminder, note, todo, or calendar event\n" +
+            "- Searching the web for real-time information you don't know\n" +
+            "- Controlling smart home devices or interacting with external apps/services\n" +
+            "- Storing or remembering information persistently for later\n\n" +
+            "Do NOT call execute for things you can handle directly:\n" +
+            "- Answering questions about what you see through the camera\n" +
+            "- General knowledge questions you already know the answer to\n" +
+            "- Having a normal conversation\n" +
+            "- Describing, identifying, or analyzing visual content\n\n" +
+            "When you DO call execute, be detailed in the task description. " +
+            "Include all relevant context: names, content, platforms, quantities, etc.\n\n" +
+            "IMPORTANT: Before calling execute, ALWAYS speak a brief acknowledgment first. " +
+            "For example:\n" +
+            "- \"Sure, let me add that to your shopping list.\" then call execute.\n" +
+            "- \"On it, sending that message.\" then call execute.\n" +
+            "Never call execute silently — the user needs verbal confirmation that you heard them " +
+            "and are working on it.",
 ) {
   companion object {
     private const val TAG = "GeminiLiveSession"
@@ -160,6 +198,7 @@ class GeminiLiveSession(
 
   /** Send a text message as user input. */
   fun sendText(text: String) {
+    Log.d(TAG, "sendText: '$text', state=${_sessionState.value}")
     val message =
         JSONObject().apply {
           put(
@@ -178,6 +217,29 @@ class GeminiLiveSession(
                     ),
                 )
                 put("turnComplete", true)
+              },
+          )
+        }
+    send(message)
+  }
+
+  /** Send a JPEG image frame as real-time input (for vision context, ~1fps). */
+  fun sendImage(jpegData: ByteArray) {
+    val base64Image = Base64.encodeToString(jpegData, Base64.NO_WRAP)
+    val message =
+        JSONObject().apply {
+          put(
+              "realtimeInput",
+              JSONObject().apply {
+                put(
+                    "mediaChunks",
+                    JSONArray().put(
+                        JSONObject().apply {
+                          put("mimeType", "image/jpeg")
+                          put("data", base64Image)
+                        },
+                    ),
+                )
               },
           )
         }
@@ -231,6 +293,9 @@ class GeminiLiveSession(
 
   private fun send(message: JSONObject) {
     val text = message.toString()
+    // Log message type for debugging (first key indicates the message kind)
+    val msgType = message.keys().asSequence().firstOrNull() ?: "unknown"
+    Log.d(TAG, "Sending [$msgType] (${text.length} bytes)")
     val sent = webSocket?.send(text) ?: false
     if (!sent) {
       Log.w(TAG, "Failed to send message (WebSocket not connected)")
@@ -248,6 +313,10 @@ class GeminiLiveSession(
                     "generationConfig",
                     JSONObject().apply {
                       put("responseModalities", JSONArray().put("AUDIO"))
+                      put(
+                          "thinkingConfig",
+                          JSONObject().apply { put("thinkingBudget", 0) },
+                      )
                       put(
                           "speechConfig",
                           JSONObject().apply {
@@ -286,25 +355,32 @@ class GeminiLiveSession(
                                     put("name", "execute")
                                     put(
                                         "description",
-                                        "Fulfill a user request by routing it to the " +
-                                            "OpenClaw gateway. Use this for any actionable " +
-                                            "task the user asks you to perform.",
+                                        "Your only way to take action. You have no memory, " +
+                                            "storage, or ability to do anything on your own " +
+                                            "-- use this tool for anything that requires an " +
+                                            "external action: sending messages, searching the " +
+                                            "web, adding to lists, setting reminders, creating " +
+                                            "notes, research, drafts, scheduling, smart home " +
+                                            "control, app interactions, buying things, or any " +
+                                            "request that goes beyond answering a question.",
                                     )
                                     put(
                                         "parameters",
                                         JSONObject().apply {
-                                          put("type", "OBJECT")
+                                          put("type", "object")
                                           put(
                                               "properties",
                                               JSONObject().apply {
                                                 put(
                                                     "task",
                                                     JSONObject().apply {
-                                                      put("type", "STRING")
+                                                      put("type", "string")
                                                       put(
                                                           "description",
-                                                          "A natural language description " +
-                                                              "of the task to execute",
+                                                          "Clear, detailed description of what " +
+                                                              "to do. Include all relevant " +
+                                                              "context: names, content, " +
+                                                              "platforms, quantities, etc.",
                                                       )
                                                     },
                                                 )
@@ -313,22 +389,45 @@ class GeminiLiveSession(
                                           put("required", JSONArray().put("task"))
                                         },
                                     )
+                                    put("behavior", "BLOCKING")
                                   },
                               ),
                           )
                         },
                     ),
                 )
+                put(
+                    "realtimeInputConfig",
+                    JSONObject().apply {
+                      put(
+                          "automaticActivityDetection",
+                          JSONObject().apply {
+                            put("disabled", false)
+                            put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
+                            put("endOfSpeechSensitivity", "END_SENSITIVITY_LOW")
+                            put("silenceDurationMs", 500)
+                            put("prefixPaddingMs", 40)
+                          },
+                      )
+                      put("activityHandling", "START_OF_ACTIVITY_INTERRUPTS")
+                      put("turnCoverage", "TURN_INCLUDES_ALL_INPUT")
+                    },
+                )
+                put("inputAudioTranscription", JSONObject())
+                put("outputAudioTranscription", JSONObject())
               },
           )
         }
 
+    Log.d(TAG, "Setup message: ${setupMessage.toString().take(500)}...")
     ws.send(setupMessage.toString())
   }
 
   private fun handleServerMessage(text: String) {
     try {
       val json = JSONObject(text)
+      val keys = json.keys().asSequence().toList()
+      Log.d(TAG, "Received server message keys=$keys (${text.length} bytes)")
 
       when {
         json.has("setupComplete") -> {
@@ -339,6 +438,19 @@ class GeminiLiveSession(
 
         json.has("toolCall") -> {
           handleToolCall(json.getJSONObject("toolCall"))
+        }
+
+        json.has("toolCallCancellation") -> {
+          val cancellation = json.getJSONObject("toolCallCancellation")
+          val idsArray = cancellation.optJSONArray("ids")
+          val ids = mutableListOf<String>()
+          if (idsArray != null) {
+            for (i in 0 until idsArray.length()) {
+              ids.add(idsArray.getString(i))
+            }
+          }
+          Log.d(TAG, "Tool call cancellation: $ids")
+          _serverEvents.tryEmit(ServerEvent.ToolCallCancellation(ids))
         }
 
         json.has("serverContent") -> {
@@ -372,8 +484,37 @@ class GeminiLiveSession(
   }
 
   private fun handleServerContent(serverContent: JSONObject) {
+    // Check for interruption
+    val interrupted = serverContent.optBoolean("interrupted", false)
+    if (interrupted) {
+      Log.d(TAG, "serverContent: interrupted")
+      _serverEvents.tryEmit(ServerEvent.Interrupted)
+      return
+    }
+
+    // Handle input transcription (what the user said)
+    val inputTranscription = serverContent.optJSONObject("inputTranscription")
+    if (inputTranscription != null) {
+      val text = inputTranscription.optString("text", "")
+      if (text.isNotEmpty()) {
+        Log.d(TAG, "inputTranscription: $text")
+        _serverEvents.tryEmit(ServerEvent.InputTranscription(text))
+      }
+    }
+
+    // Handle output transcription (what the model said)
+    val outputTranscription = serverContent.optJSONObject("outputTranscription")
+    if (outputTranscription != null) {
+      val text = outputTranscription.optString("text", "")
+      if (text.isNotEmpty()) {
+        Log.d(TAG, "outputTranscription: $text")
+        _serverEvents.tryEmit(ServerEvent.OutputTranscription(text))
+      }
+    }
+
     // Check for turn completion
     val turnComplete = serverContent.optBoolean("turnComplete", false)
+    val hasModelTurn = serverContent.has("modelTurn")
 
     // Process model turn content
     val modelTurn = serverContent.optJSONObject("modelTurn")

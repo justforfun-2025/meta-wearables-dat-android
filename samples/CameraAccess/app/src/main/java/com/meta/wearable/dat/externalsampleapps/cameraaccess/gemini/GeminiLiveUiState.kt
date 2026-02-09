@@ -22,6 +22,7 @@ data class TranscriptEntry(
     val role: TranscriptRole,
     val text: String,
     val timestamp: Long = System.currentTimeMillis(),
+    val isFinalized: Boolean = true,
 )
 
 enum class TranscriptRole {

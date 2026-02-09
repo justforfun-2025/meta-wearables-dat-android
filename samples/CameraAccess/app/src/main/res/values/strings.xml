@@ -64,6 +64,7 @@
     <string name="gemini_live_tool_call" description="Tool call label">OpenClaw</string>
     <string name="gemini_live_fulfilling" description="Fulfilling task">Fulfilling via OpenClaw…</string>
     <string name="gemini_live_button" description="Gemini Live nav button">Gemini Live</string>
+    <string name="gemini_live_ai_button" description="AI toggle button">AI Assistant</string>
 
     <!-- Getting Started Sheet -->
     <string name="getting_started_title" description="Getting Started sheet title">Getting started</string>

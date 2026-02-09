@@ -155,15 +155,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
   }
 
   fun navigateToDeviceSelection() {
-    _uiState.update { it.copy(isStreaming = false, isGeminiLive = false) }
-  }
-
-  fun navigateToGeminiLive() {
-    _uiState.update { it.copy(isGeminiLive = true) }
-  }
-
-  fun navigateFromGeminiLive() {
-    _uiState.update { it.copy(isGeminiLive = false) }
+    _uiState.update { it.copy(isStreaming = false) }
   }
 
   fun showDebugMenu() {
