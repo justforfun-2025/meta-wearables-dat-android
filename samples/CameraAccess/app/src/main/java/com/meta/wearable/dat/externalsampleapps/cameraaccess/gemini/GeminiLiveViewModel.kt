@@ -26,6 +26,8 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -85,6 +87,8 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
 
   private var audioRecord: AudioRecord? = null
   private var audioTrack: AudioTrack? = null
+  private var echoCanceler: AcousticEchoCanceler? = null
+  private var noiseSuppressor: NoiseSuppressor? = null
   private var recordingJob: Job? = null
   private var eventCollectionJob: Job? = null
   private var sessionStateJob: Job? = null
@@ -196,9 +200,13 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     try {
+      // Use VOICE_COMMUNICATION to enable the platform's built-in echo cancellation pipeline.
+      // This tells Android that audio capture and playback are happening simultaneously
+      // for a two-way voice conversation, so the hardware AEC can cancel speaker output
+      // from the mic input.
       audioRecord =
           AudioRecord(
-              MediaRecorder.AudioSource.MIC,
+              MediaRecorder.AudioSource.VOICE_COMMUNICATION,
               CAPTURE_SAMPLE_RATE,
               CAPTURE_CHANNEL,
               CAPTURE_ENCODING,
@@ -211,6 +219,23 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
         audioRecord = null
         _uiState.update { it.copy(errorMessage = "Failed to initialize microphone") }
         return
+      }
+
+      // Attach Acoustic Echo Canceler if available on this device
+      val sessionId = audioRecord!!.audioSessionId
+      if (AcousticEchoCanceler.isAvailable()) {
+        echoCanceler = AcousticEchoCanceler.create(sessionId)
+        echoCanceler?.enabled = true
+        Log.d(TAG, "AcousticEchoCanceler enabled")
+      } else {
+        Log.w(TAG, "AcousticEchoCanceler not available on this device")
+      }
+
+      // Attach Noise Suppressor if available
+      if (NoiseSuppressor.isAvailable()) {
+        noiseSuppressor = NoiseSuppressor.create(sessionId)
+        noiseSuppressor?.enabled = true
+        Log.d(TAG, "NoiseSuppressor enabled")
       }
 
       audioRecord?.startRecording()
@@ -243,6 +268,10 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
   private fun stopRecording() {
     recordingJob?.cancel()
     recordingJob = null
+    echoCanceler?.release()
+    echoCanceler = null
+    noiseSuppressor?.release()
+    noiseSuppressor = null
     try {
       audioRecord?.stop()
     } catch (e: IllegalStateException) {
@@ -264,7 +293,7 @@ class GeminiLiveViewModel(application: Application) : AndroidViewModel(applicati
         AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build(),
             )
