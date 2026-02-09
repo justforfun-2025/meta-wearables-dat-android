@@ -6,11 +6,24 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import java.util.Properties
+import kotlin.io.path.div
+import kotlin.io.path.exists
+import kotlin.io.path.inputStream
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.jetbrains.kotlin.android)
   alias(libs.plugins.compose.compiler)
 }
+
+val localProperties =
+    Properties().apply {
+      val localPropertiesPath = rootDir.toPath() / "local.properties"
+      if (localPropertiesPath.exists()) {
+        load(localPropertiesPath.inputStream())
+      }
+    }
 
 android {
   namespace = "com.meta.wearable.dat.externalsampleapps.cameraaccess"
@@ -27,6 +40,17 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     vectorDrawables { useSupportLibrary = true }
+
+    buildConfigField(
+        "String",
+        "GEMINI_API_KEY",
+        "\"${localProperties.getProperty("gemini_api_key", "")}\""
+    )
+    buildConfigField(
+        "String",
+        "OPENCLAW_URL",
+        "\"${localProperties.getProperty("openclaw_url", "")}\""
+    )
   }
 
   buildTypes {
@@ -66,6 +90,7 @@ dependencies {
   implementation(libs.mwdat.core)
   implementation(libs.mwdat.camera)
   implementation(libs.mwdat.mockdevice)
+  implementation(libs.okhttp)
   androidTestImplementation(libs.androidx.ui.test.junit4)
   androidTestImplementation(libs.androidx.test.uiautomator)
   androidTestImplementation(libs.androidx.test.rules)

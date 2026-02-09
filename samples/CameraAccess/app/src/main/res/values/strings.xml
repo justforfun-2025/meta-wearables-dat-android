@@ -48,6 +48,23 @@
     <string name="has_captured_image" description="Has captured image">Has captured image</string>
     <string name="no_captured_image" description="No captured image">No captured image</string>
 
+    <!-- Gemini Live -->
+    <string name="gemini_live_title" description="Gemini Live screen title">Gemini Live</string>
+    <string name="gemini_live_back" description="Back button">Back</string>
+    <string name="gemini_live_connect" description="Connect button">Connect to Gemini</string>
+    <string name="gemini_live_disconnect" description="Disconnect button">Disconnect</string>
+    <string name="gemini_live_connected" description="Connected status">Connected</string>
+    <string name="gemini_live_connecting" description="Connecting status">Connecting</string>
+    <string name="gemini_live_disconnected" description="Disconnected status">Disconnected</string>
+    <string name="gemini_live_error" description="Error status">Error</string>
+    <string name="gemini_live_start_mic" description="Start microphone">Start microphone</string>
+    <string name="gemini_live_stop_mic" description="Stop microphone">Stop microphone</string>
+    <string name="gemini_live_text_hint" description="Text input hint">Type a message…</string>
+    <string name="gemini_live_send" description="Send text message">Send</string>
+    <string name="gemini_live_tool_call" description="Tool call label">OpenClaw</string>
+    <string name="gemini_live_fulfilling" description="Fulfilling task">Fulfilling via OpenClaw…</string>
+    <string name="gemini_live_button" description="Gemini Live nav button">Gemini Live</string>
+
     <!-- Getting Started Sheet -->
     <string name="getting_started_title" description="Getting Started sheet title">Getting started</string>
     <string name="getting_started_tip_permission" description="Tip about camera permission">First, Camera Access needs permission to use your glasses camera.</string>
