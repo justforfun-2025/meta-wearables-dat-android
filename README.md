@@ -2,7 +2,7 @@
 
 > **See it. Say it. Done.** — AI glasses that understand your world and act on it.
 
-A hands-free AI assistant for **Meta Ray-Ban smart glasses** that combines real-time voice conversation and live camera vision (powered by **Gemini Live API**) with real-world task execution (powered by **[OpenClaw](https://github.com/justforfun-2025/androidclaw)**). Built on the official [Meta Wearables Device Access Toolkit](https://wearables.developer.meta.com/docs/develop/).
+A hands-free AI assistant for **Meta Ray-Ban smart glasses** that combines real-time voice conversation and live camera vision (powered by **Gemini Live API**) with real-world task execution (powered by **[AndroidClaw](https://github.com/justforfun-2025/androidclaw)**). Built on the official [Meta Wearables Device Access Toolkit](https://wearables.developer.meta.com/docs/develop/).
 
 ## Architecture
 
