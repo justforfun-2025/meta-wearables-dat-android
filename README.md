@@ -1,135 +1,232 @@
-# Meta Wearables Device Access Toolkit for Android
+# AndroidClaw Client
 
-[![Maven](https://img.shields.io/badge/Maven-0.4.0-brightgreen?logo=apachemaven)](https://github.com/orgs/facebook/packages?repo_name=meta-wearables-dat-android)
-[![Docs](https://img.shields.io/badge/API_Reference-0.4-blue?logo=meta)](https://wearables.developer.meta.com/docs/reference/android/dat/0.4)
+> **See it. Say it. Done.** — AI glasses that understand your world and act on it.
 
-The Meta Wearables Device Access Toolkit enables developers to utilize Meta's AI glasses to build hands-free wearable experiences into their mobile applications.
-By integrating this SDK, developers can reliably connect to Meta's AI glasses and leverage capabilities like video streaming and photo capture.
+A hands-free AI assistant for **Meta Ray-Ban smart glasses** that combines real-time voice conversation and live camera vision (powered by **Gemini Live API**) with real-world task execution (powered by **[OpenClaw](https://github.com/justforfun-2025/androidclaw)**). Built on the official [Meta Wearables Device Access Toolkit](https://wearables.developer.meta.com/docs/develop/).
 
-The Wearables Device Access Toolkit is in developer preview.
-Developers can access our SDK and documentation, test on supported AI glasses, and create organizations and release channels to share with test users.
+## Architecture
 
-## Documentation & Community
-
-Find our full [developer documentation](https://wearables.developer.meta.com/docs/develop/) on the Wearables Developer Center.
-
-You can find an overview of the Wearables Developer Center [here](https://wearables.developer.meta.com/).
-Create an account to stay informed of all updates, report bugs and register your organization.
-Set up a project and release channel to share your integration with test users.
-
-For help, discussion about best practices or to suggest feature ideas visit our [discussions forum](https://github.com/facebook/meta-wearables-dat-android/discussions).
-
-See the [changelog](CHANGELOG.md) for the latest updates.
-
-## Including the SDK in your project
-
-You can add the Wearables Device Access Toolkit to your Gradle project by following the steps below.
-You will need to provide a personal access token (classic) with at least **read:packages** scope as an environment variable named `GITHUB_TOKEN` or
-by adding it as a property named `github_token` in your `local.properties` file.
-See [SDK for Android setup](https://wearables.developer.meta.com/docs/getting-started-toolkit/#sdk-for-android-setup) for more details.
-
-### 1. Add the repository definition to `settings.gradle.kts`
-
-```kotlin
-val localProperties =
-    Properties().apply {
-        val localPropertiesPath = rootDir.toPath() / "local.properties"
-        if (localPropertiesPath.exists()) {
-            load(localPropertiesPath.inputStream())
-        }
-    }
-
-dependencyResolutionManagement {
-    ...
-    repositories {
-        ...
-        maven {
-            url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
-            credentials {
-                username = "" // not needed
-                password = System.getenv("GITHUB_TOKEN") ?: localProperties.getProperty("github_token")
-            }
-        }
-    }
-}
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  Meta Ray-Ban Smart Glasses                                         │
+│  ┌──────────┐  ┌──────────┐                                         │
+│  │  Camera   │  │   Mic    │                                         │
+│  └────┬─────┘  └────┬─────┘                                         │
+│       │ video        │ audio                                         │
+└───────┼──────────────┼──────────────────────────────────────────────┘
+        │              │          Bluetooth
+┌───────▼──────────────▼──────────────────────────────────────────────┐
+│  Android Phone (this app)                                           │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │  StreamScreen (Jetpack Compose)                             │    │
+│  │  ┌───────────────────┐  ┌─────────────────────────────────┐ │    │
+│  │  │  Live Video Feed  │  │  Gemini AI Overlay              │ │    │
+│  │  │  (full-screen)    │  │  - Live transcription           │ │    │
+│  │  │                   │  │  - Conversation transcript       │ │    │
+│  │  │  Video frames ────┼──│  - Tool call status             │ │    │
+│  │  │  sent to Gemini   │  │  - Mic / text input controls    │ │    │
+│  │  │  at ~1fps         │  │                                 │ │    │
+│  │  └───────────────────┘  └─────────────────────────────────┘ │    │
+│  └──────────────────────────┬──────────────────────────────────┘    │
+│                             │                                       │
+│  ┌──────────────────────────▼──────────────────────────────────┐    │
+│  │  GeminiLiveViewModel                                        │    │
+│  │  - Audio capture (16kHz PCM) → Gemini                       │    │
+│  │  - Audio playback (24kHz PCM) ← Gemini                      │    │
+│  │  - Video frame forwarding → Gemini                          │    │
+│  │  - Tool call routing → OpenClawClient                       │    │
+│  │  - AEC + Noise Suppression                                  │    │
+│  └───────┬─────────────────────────────────┬───────────────────┘    │
+│          │ WebSocket                       │ HTTP POST              │
+│          │ (bidirectional audio+vision)    │ /v1/chat/completions   │
+└──────────┼─────────────────────────────────┼────────────────────────┘
+           │                                 │
+           ▼                                 ▼
+┌─────────────────────┐     ┌──────────────────────────────────────┐
+│  Gemini Live API    │     │  OpenClaw Gateway (AndroidClaw)      │
+│                     │     │  github.com/justforfun-2025/         │
+│  Model: gemini-2.5  │     │           androidclaw                │
+│  -flash-native-     │     │                                      │
+│   audio-preview     │     │  Runs in AVF Linux VM on Pixel 9     │
+│                     │     │  - Node.js 22 + OpenClaw 2026.2.9    │
+│  Capabilities:      │     │  - Playwright + Chromium (browser)   │
+│  - Native audio I/O │     │  - 56+ connected skills              │
+│  - Vision input     │     │  - ws://192.168.0.2:18790            │
+│  - Function calling │     │                                      │
+│  - Live transcripts │     │  Skills: messaging, web search,      │
+│                     │     │  lists, reminders, notes, smart      │
+│                     │     │  home, app control, research, ...    │
+└─────────────────────┘     └──────────────────────────────────────┘
 ```
 
-### 2. Declare the Wearables Device Access Toolkit artifacts in `libs.versions.toml`
+## How It Works
 
-Check the available versions in [GitHub Packages](https://github.com/orgs/facebook/packages?repo_name=meta-wearables-dat-android).
+1. **User speaks** to their Meta Ray-Ban glasses → audio streams to the phone via Bluetooth
+2. **Audio + video frames** are forwarded to Gemini Live via WebSocket in real time
+3. **Gemini processes** the multimodal input (voice + vision) and responds with spoken audio
+4. If the user requests an **action** (send a message, search the web, add to a list, etc.):
+   - Gemini speaks a verbal acknowledgment: *"Sure, adding that to your list."*
+   - Gemini invokes the `execute` tool with a task description
+   - `OpenClawClient` sends an HTTP POST to the [AndroidClaw](https://github.com/justforfun-2025/androidclaw) gateway
+   - OpenClaw executes the task using its 56+ connected skills (including browser automation)
+   - The result returns to Gemini, which speaks the confirmation
+5. If the user asks a **question** Gemini can answer directly (identify an object, read a sign, general knowledge), it responds without calling the tool
 
-```toml
-[versions]
-mwdat = "0.4.0"
+## Key Components
 
-[libraries]
-mwdat-core = { group = "com.meta.wearable", name = "mwdat-core", version.ref = "mwdat" }
-mwdat-camera = { group = "com.meta.wearable", name = "mwdat-camera", version.ref = "mwdat" }
-mwdat-mockdevice = { group = "com.meta.wearable", name = "mwdat-mockdevice", version.ref = "mwdat" }
+```
+samples/CameraAccess/app/src/main/java/.../cameraaccess/
+├── gemini/
+│   ├── GeminiLiveSession.kt      # WebSocket client for Gemini Live API
+│   │                              # - Connection lifecycle & setup message
+│   │                              # - Tool declaration (execute function)
+│   │                              # - Audio/image/text sending
+│   │                              # - Server message parsing (audio, tool calls,
+│   │                              #   transcriptions, interruptions)
+│   │
+│   ├── GeminiLiveViewModel.kt    # Session controller (AndroidViewModel)
+│   │                              # - Mic capture: 16kHz mono PCM → Gemini
+│   │                              # - Speaker playback: 24kHz mono PCM (sequential Channel)
+│   │                              # - Video frame forwarding: ~1fps JPEG → Gemini
+│   │                              # - Tool call routing → OpenClawClient
+│   │                              # - AEC + Noise Suppression
+│   │                              # - Live transcript management
+│   │
+│   ├── GeminiLiveUiState.kt      # UI state: connection, transcript, tool calls
+│   │
+│   └── OpenClawClient.kt         # HTTP client for OpenClaw gateway
+│                                  # - POST /v1/chat/completions (OpenAI-compatible)
+│                                  # - Bearer token auth + session key header
+│                                  # - Response parsing: choices[0].message.content
+│
+├── ui/
+│   ├── StreamScreen.kt            # Unified video + Gemini overlay UI
+│   │                              # - Full-screen live video from glasses
+│   │                              # - Transparent Gemini chat overlay
+│   │                              # - Live transcription with cursor indicator
+│   │                              # - Mic toggle + text input controls
+│   │                              # - Tool call status card
+│   │
+│   ├── CameraAccessScaffold.kt   # Top-level navigation scaffold
+│   └── ...                        # Other UI screens (home, non-stream, etc.)
+│
+├── stream/                        # DAT video streaming logic
+├── wearables/                     # DAT device connection management
+├── mockdevicekit/                 # Mock device for development/testing
+└── MainActivity.kt                # Entry point, permissions handling
 ```
 
-### 3. Add the required components as dependencies in your app's `build.gradle.kts`
+## Tech Stack
 
-```kotlin
-dependencies {
-    implementation(libs.mwdat.core)
-    implementation(libs.mwdat.camera)
-    implementation(libs.mwdat.mockdevice)
-}
+| Layer | Technology | Details |
+|-------|-----------|---------|
+| **Glasses** | Meta Ray-Ban | Camera + microphone via Bluetooth |
+| **SDK** | Meta Wearables DAT 0.4.0 | Video streaming, photo capture, device management |
+| **AI Model** | Gemini 2.5 Flash (native audio preview) | Real-time multimodal: voice I/O, vision, function calling |
+| **AI Protocol** | WebSocket (Gemini Live API) | Bidirectional streaming with `BidiGenerateContent` |
+| **Action Gateway** | [AndroidClaw](https://github.com/justforfun-2025/androidclaw) (OpenClaw) | AVF Linux VM, Node.js 22, Playwright, 56+ skills |
+| **Gateway Protocol** | HTTP POST `/v1/chat/completions` | OpenAI-compatible, Bearer auth, session continuity |
+| **UI** | Jetpack Compose + Material 3 | Video overlay with transparent chat, live transcription |
+| **Audio** | AudioRecord / AudioTrack | 16kHz capture, 24kHz playback, AEC + noise suppression |
+| **Networking** | OkHttp 4.12 | WebSocket (Gemini) + HTTP (OpenClaw) |
+| **Architecture** | MVVM | ViewModel + StateFlow + Compose |
+| **Language** | Kotlin | Coroutines, Channels, Flow |
+
+## Gemini Live Configuration
+
+The setup message configures Gemini with:
+
+- **Model**: `gemini-2.5-flash-native-audio-preview-12-2025`
+- **Voice**: `Puck`
+- **Response modality**: Audio only
+- **Thinking budget**: 0 (instant responses)
+- **Tool**: `execute(task: string)` with `BLOCKING` behavior
+- **VAD**: Automatic activity detection with high start sensitivity, low end sensitivity
+- **Transcription**: Both input and output audio transcription enabled
+- **System instruction**: Smart routing — answers questions directly, delegates actions to OpenClaw
+
+## Audio Pipeline
+
+```
+┌──────────────┐    16kHz PCM     ┌──────────────┐    Audio chunks    ┌──────────┐
+│  Microphone  │ ──────────────▶  │  AudioRecord  │ ────────────────▶ │  Gemini  │
+│  (glasses)   │    100ms chunks  │  + AEC + NS   │   Base64 encoded  │  Live    │
+└──────────────┘                  └──────────────┘                    │  API     │
+                                                                      │          │
+┌──────────────┐    24kHz PCM     ┌──────────────┐    Audio chunks    │          │
+│  Speaker     │ ◀──────────────  │  AudioTrack   │ ◀──────────────── │          │
+│  (phone)     │    Sequential    │  (voice comm) │   Base64 decoded  │          │
+└──────────────┘    Channel       └──────────────┘                    └──────────┘
 ```
 
-## Developer Terms
+- **Echo cancellation**: `VOICE_COMMUNICATION` audio source + `AcousticEchoCanceler`
+- **Noise suppression**: `NoiseSuppressor` attached to AudioRecord session
+- **Playback**: Single sequential coroutine drains a `Channel<ByteArray>` to prevent AudioTrack race conditions
 
-- By using the Wearables Device Access Toolkit, you agree to our [Meta Wearables Developer Terms](https://wearables.developer.meta.com/terms),
-  including our [Acceptable Use Policy](https://wearables.developer.meta.com/acceptable-use-policy).
-- By enabling Meta integrations, including through this SDK, Meta may collect information about how users' Meta devices communicate with your app.
-  Meta will use this information collected in accordance with our [Privacy Policy](https://www.meta.com/legal/privacy-policy/).
-- You may limit Meta's access to data from users' devices by following the instructions below.
+## Setup
 
-### Opting out of data collection
+### Prerequisites
 
-To configure analytics settings in your Meta Wearables DAT Android app, add the following `<meta-data>` element to your
-app's `AndroidManifest.xml` file within the `<application>` element:
+- Android Studio (2021.3.1+)
+- Android SDK 31+ (Android 12.0+)
+- Meta Ray-Ban smart glasses (or use MockDeviceKit for development)
+- [AndroidClaw](https://github.com/justforfun-2025/androidclaw) gateway running (AVF Linux VM on Pixel 9)
+- Gemini API key with access to the Live API
 
-```xml
-<meta-data
-    android:name="com.meta.wearable.mwdat.ANALYTICS_OPT_OUT"
-    android:value="true"
-    />
+### Configuration
+
+Add to `samples/CameraAccess/local.properties`:
+
+```properties
+# GitHub Packages token (read:packages scope) for Meta DAT SDK
+github_token=ghp_your_token_here
+
+# Gemini API key
+gemini_api_key=your_gemini_api_key
+
+# OpenClaw gateway (AndroidClaw running in AVF VM)
+openclaw_url=http://192.168.0.2:18790
+openclaw_token=androidclaw-local-token
 ```
 
-**Default behavior:** If the `ANALYTICS_OPT_OUT` metadata is missing or set to `false`, analytics are enabled
-(i.e., you are **not** opting out). Set to `true` to disable data collection.
+### Build & Run
 
-**Note:** In other words, this setting controls whether or not you're opting out of analytics:
-
-- `true` = Opt out (analytics **disabled**)
-- `false` = Opt in (analytics **enabled**)
-
-**Complete example:**
-
-```xml
-<application
-    android:name=".MyApplication"
-    android:label="MyApp"
-    android:icon="@mipmap/app_launcher">
-
-    <!-- Required: Your application ID from Wearables Developer Center -->
-    <meta-data
-        android:name="com.meta.wearable.mwdat.APPLICATION_ID"
-        android:value="your_app_id_here"
-        />
-
-    <!-- Optional: Disable analytics -->
-    <meta-data
-        android:name="com.meta.wearable.mwdat.ANALYTICS_OPT_OUT"
-        android:value="true"
-        />
-
-    <!-- Your activities and other components -->
-</application>
+```bash
+cd samples/CameraAccess
+./gradlew installDebug
 ```
+
+### Network Setup
+
+The app connects to the OpenClaw gateway at `http://192.168.0.2:18790` (the AVF Linux VM's bridge IP). Cleartext HTTP is permitted via `network_security_config.xml`.
+
+If using ADB reverse instead of the VM bridge:
+```bash
+adb reverse tcp:18790 tcp:18790
+# Then set openclaw_url=http://127.0.0.1:18790 in local.properties
+```
+
+### Permissions
+
+The app requires:
+- `BLUETOOTH` / `BLUETOOTH_CONNECT` — Meta glasses connection
+- `INTERNET` — Gemini WebSocket + OpenClaw HTTP
+- `RECORD_AUDIO` — Microphone capture for voice input
+
+## Related Projects
+
+- **[AndroidClaw](https://github.com/justforfun-2025/androidclaw)** — OpenClaw AI gateway running on-device in an AVF Linux VM with Playwright browser tooling
+- **[VisionClaw](https://github.com/sseanliu/VisionClaw)** — The iOS counterpart with the same Gemini Live + OpenClaw architecture
+- **[Meta Wearables DAT](https://github.com/facebook/meta-wearables-dat-android)** — Official SDK for Meta AI glasses
+
+## Acknowledgments
+
+- **[VisionClaw](https://github.com/sseanliu/VisionClaw)** — The iOS implementation that inspired this project's Gemini Live + OpenClaw architecture for smart glasses.
+- **[Meta Wearables Device Access Toolkit](https://wearables.developer.meta.com/)** — For providing the SDK that makes camera and sensor access on Meta Ray-Ban glasses possible.
+- **[Google Gemini](https://ai.google.dev/)** — For the Live API enabling real-time multimodal voice and vision interaction.
+- **[OpenClaw](https://github.com/openclaw/openclaw)** — The AI agent framework powering task execution with 56+ skills.
 
 ## License
 
-See the [LICENSE](LICENSE) file.
+This source code is licensed under the license found in the LICENSE file in the root directory of this source tree.

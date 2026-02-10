@@ -11,7 +11,7 @@
 // Sends task execution requests to the OpenClaw gateway via HTTP POST
 // to the /v1/chat/completions endpoint (OpenAI-compatible).
 // Uses Bearer token authentication and session key for continuity.
-// Follows the same protocol as VisionClaw's OpenClawBridge.
+// Follows the OpenAI-compatible chat completions protocol.
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 
